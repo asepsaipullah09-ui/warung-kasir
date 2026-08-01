@@ -95,13 +95,24 @@ export default function KasirPage() {
   const totalAmount = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0)
 
   // Proses checkout
-  const handleCheckout = async () => {
+    // Proses checkout
+  const handleCheckout = async (isDebt = false) => {
     if (cart.length === 0) {
       alert('Keranjang masih kosong!')
       return
     }
 
-    if (!confirm(`Total pembayaran: Rp ${totalAmount.toLocaleString('id-ID')}\n\nLanjutkan transaksi?`)) {
+    if (isDebt && (!customerName || !customerPhone)) {
+      alert('Nama dan nomor telepon pelanggan wajib diisi!')
+      return
+    }
+
+    const totalText = `Total pembayaran: Rp ${totalAmount.toLocaleString('id-ID')}`
+    const confirmText = isDebt 
+      ? `${totalText}\n\nCatat sebagai HUTANG atas nama ${customerName}?`
+      : `${totalText}\n\nLanjutkan transaksi?`
+
+    if (!confirm(confirmText)) {
       return
     }
 
@@ -126,7 +137,7 @@ export default function KasirPage() {
         .insert({
           cashier_id: user.id,
           total_amount: totalAmount,
-          payment_method: 'tunai',
+          payment_method: isDebt ? 'hutang' : 'tunai',
           status: 'completed'
         })
         .select()
@@ -148,9 +159,31 @@ export default function KasirPage() {
 
       if (itemsError) throw itemsError
 
-      alert('Transaksi berhasil!')
-      setCart([]) // Kosongkan keranjang
-      fetchProducts() // Refresh produk (stok updated)
+      // 4. Jika hutang, catat ke tabel debts
+      if (isDebt) {
+        const { error: debtError } = await supabase
+          .from('debts')
+          .insert({
+            customer_name: customerName,
+            customer_phone: customerPhone,
+            transaction_id: transaction.id,
+            total_debt: totalAmount,
+            paid_amount: 0,
+            remaining_debt: totalAmount,
+            status: 'belum_lunas'
+          })
+
+        if (debtError) throw debtError
+      }
+
+      alert(isDebt ? 'Hutang berhasil dicatat!' : 'Transaksi berhasil!')
+      
+      // Reset form
+      setCart([])
+      setShowDebtModal(false)
+      setCustomerName('')
+      setCustomerPhone('')
+      fetchProducts()
 
     } catch (error) {
       console.error('Error:', error)
