@@ -16,7 +16,7 @@ export default function Home() {
         
         <div className="space-y-4">
           <button
-            onClick={() => router.push('/login')}
+            onClick={() => router.push('/dashboard/kasir')}
             className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-6 rounded-lg transition transform hover:scale-105"
           >
              Login
