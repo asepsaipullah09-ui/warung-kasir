@@ -1,26 +1,101 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 import { useRouter } from 'next/navigation'
+import { useToast } from '@/components/Toast'
+import { formatRupiah, formatDate, todayISO } from '@/lib/utils'
 
-export default function PemilikPage() {
+export default function LaporanPage() {
   const [loading, setLoading] = useState(true)
   const [user, setUser] = useState<any>(null)
-  
-  // Tambahkan tipe data any[] agar Vercel tidak komplain saat build
-  const [dailyReport, setDailyReport] = useState({
+  const [range, setRange] = useState<'hari' | 'minggu' | 'bulan' | 'kustom'>('hari')
+  const [startDate, setStartDate] = useState(todayISO())
+  const [endDate, setEndDate] = useState(todayISO())
+  const [report, setReport] = useState({
     totalTransactions: 0,
     totalRevenue: 0,
-    transactions: [] as any[]
+    totalCash: 0,
+    totalDebt: 0,
+    transactions: [] as any[],
   })
-  const [debts, setDebts] = useState<any[]>([])
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0])
   const router = useRouter()
+  const { showToast } = useToast()
+
+  const applyRange = useCallback((r: typeof range) => {
+    const today = new Date()
+    const end = todayISO()
+    let start = todayISO()
+
+    if (r === 'minggu') {
+      const d = new Date(today)
+      d.setDate(d.getDate() - 7)
+      start = d.toISOString().split('T')[0]
+    } else if (r === 'bulan') {
+      const d = new Date(today)
+      d.setMonth(d.getMonth() - 1)
+      start = d.toISOString().split('T')[0]
+    }
+
+    setStartDate(start)
+    setEndDate(end)
+    setRange(r)
+    return { start, end }
+  }, [])
+
+  const fetchReport = useCallback(async (start: string, end: string) => {
+    setLoading(true)
+    const startOfDay = `${start}T00:00:00`
+    const endOfDay = `${end}T23:59:59`
+
+    const { data, error } = await supabase
+      .from('transactions')
+      .select(`
+        *,
+        transaction_items (
+          product_id,
+          quantity,
+          subtotal_price,
+          products (name)
+        )
+      `)
+      .gte('transaction_date', startOfDay)
+      .lte('transaction_date', endOfDay)
+      .order('transaction_date', { ascending: false })
+
+    if (error) {
+      console.error('Error fetching transactions:', error)
+      showToast('Gagal memuat laporan', 'error')
+      setReport({
+        totalTransactions: 0,
+        totalRevenue: 0,
+        totalCash: 0,
+        totalDebt: 0,
+        transactions: [],
+      })
+    } else {
+      const transactions = data || []
+      const totalRevenue = transactions.reduce((sum: number, tx: any) => sum + (tx.total_amount || 0), 0)
+      const totalCash = transactions
+        .filter((tx: any) => tx.payment_method === 'tunai')
+        .reduce((sum: number, tx: any) => sum + (tx.total_amount || 0), 0)
+      const totalDebt = transactions
+        .filter((tx: any) => tx.payment_method === 'hutang')
+        .reduce((sum: number, tx: any) => sum + (tx.total_amount || 0), 0)
+
+      setReport({
+        totalTransactions: transactions.length,
+        totalRevenue,
+        totalCash,
+        totalDebt,
+        transactions,
+      })
+    }
+    setLoading(false)
+  }, [showToast])
 
   useEffect(() => {
     const checkAuth = async () => {
       const { data: { user } } = await supabase.auth.getUser()
-      
       if (!user) {
         router.push('/login')
         return
@@ -33,231 +108,184 @@ export default function PemilikPage() {
         .single()
 
       if (profile?.role !== 'pemilik') {
-        alert('Akses ditolak! Hanya pemilik yang bisa mengakses halaman ini.')
-        router.push('/login')
+        showToast('Akses ditolak! Hanya pemilik yang bisa mengakses halaman ini.', 'error')
+        router.push('/dashboard')
         return
       }
 
       setUser(user)
-      fetchDailyReport(selectedDate)
-      fetchDebts()
+      const { start, end } = applyRange('hari')
+      fetchReport(start, end)
     }
-
     checkAuth()
-  }, [router]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [router, showToast, applyRange, fetchReport])
 
-  // Ambil laporan harian berdasarkan tanggal
-  const fetchDailyReport = async (date: string) => {
-    setLoading(true)
-    
-    const startOfDay = `${date}T00:00:00`
-    const endOfDay = `${date}T23:59:59`
+  const handleRangeChange = (r: typeof range) => {
+    const { start, end } = applyRange(r)
+    fetchReport(start, end)
+  }
 
-    const { data: transactions, error } = await supabase
-      .from('transactions')
-      .select(`
-        *,
-        transaction_items (
-          product_id,
-          quantity,
-          subtotal_price,
-          products (
-            name
-          )
-        )
-      `)
-      .gte('transaction_date', startOfDay)
-      .lte('transaction_date', endOfDay)
-      .order('transaction_date', { ascending: false })
-
-    if (error) {
-      console.error('Error fetching transactions:', error)
-      // Pastikan tetap array kosong jika error
-      setDailyReport({ totalTransactions: 0, totalRevenue: 0, transactions: [] })
-    } else {
-      // Gunakan (transactions || []) untuk mencegah error jika data null
-      const safeTransactions = transactions || []
-      const totalRevenue = safeTransactions.reduce((sum: number, tx: any) => sum + (tx.total_amount || 0), 0)
-      
-      setDailyReport({
-        totalTransactions: safeTransactions.length,
-        totalRevenue,
-        transactions: safeTransactions
-      })
+  const handleCustomFilter = () => {
+    if (!startDate || !endDate) {
+      showToast('Pilih tanggal awal dan akhir!', 'error')
+      return
     }
-    setLoading(false)
+    setRange('kustom')
+    fetchReport(startDate, endDate)
   }
 
-  // Ambil data hutang yang belum lunas
-  const fetchDebts = async () => {
-    const { data, error } = await supabase
-      .from('debts')
-      .select(`
-        *,
-        transactions (
-          transaction_date
-        )
-      `)
-      .eq('status', 'belum_lunas')
-      .order('created_at', { ascending: false })
-
-    if (error) {
-      console.error('Error fetching debts:', error)
-      setDebts([])
-    } else {
-      // Gunakan (data || []) untuk mencegah error jika data null
-      setDebts(data || [])
-    }
-  }
-
-  const formatRupiah = (amount: number) => {
-    return `Rp ${(amount || 0).toLocaleString('id-ID')}`
-  }
-
-  const formatDate = (dateString: string) => {
-    if (!dateString) return '-'
-    return new Date(dateString).toLocaleString('id-ID', {
-      dateStyle: 'medium',
-      timeStyle: 'short'
-    })
-  }
-
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600"></div>
-      </div>
-    )
-  }
+  const statCards = [
+    {
+      title: 'Total Transaksi',
+      value: `${report.totalTransactions}`,
+      sub: 'transaksi',
+      icon: '🧾',
+      color: 'bg-blue-50 text-blue-600',
+    },
+    {
+      title: 'Total Omset',
+      value: formatRupiah(report.totalRevenue),
+      sub: 'semua pembayaran',
+      icon: '💰',
+      color: 'bg-green-50 text-green-600',
+    },
+    {
+      title: 'Pembayaran Tunai',
+      value: formatRupiah(report.totalCash),
+      sub: 'cash',
+      icon: '💵',
+      color: 'bg-purple-50 text-purple-600',
+    },
+    {
+      title: 'Penjualan Hutang',
+      value: formatRupiah(report.totalDebt),
+      sub: 'kredit',
+      icon: '📝',
+      color: 'bg-red-50 text-red-600',
+    },
+  ]
 
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className="space-y-6">
       {/* Header */}
-      <header className="bg-green-600 text-white p-4 shadow-md">
-        <div className="container mx-auto flex justify-between items-center">
-          <h1 className="text-2xl font-bold">Dashboard Pemilik Warung</h1>
-          <button
-            onClick={async () => {
-              await supabase.auth.signOut()
-              router.push('/login')
-            }}
-            className="bg-red-500 hover:bg-red-600 px-4 py-2 rounded"
-          >
-            Logout
-          </button>
-        </div>
-      </header>
+      <div>
+        <h1 className="text-2xl md:text-3xl font-bold text-gray-800">📊 Laporan Penjualan</h1>
+        <p className="text-gray-500 text-sm">Pantau omset dan transaksi warung</p>
+      </div>
 
-      <div className="container mx-auto p-4">
-        {/* Summary Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          <div className="bg-white rounded-lg shadow p-6">
-            <h3 className="text-gray-600 text-sm mb-2">Total Transaksi Hari Ini</h3>
-            <p className="text-3xl font-bold text-blue-600">{dailyReport.totalTransactions}</p>
-            <p className="text-sm text-gray-500">transaksi</p>
-          </div>
-
-          <div className="bg-white rounded-lg shadow p-6">
-            <h3 className="text-gray-600 text-sm mb-2">Omset Hari Ini</h3>
-            <p className="text-3xl font-bold text-green-600">{formatRupiah(dailyReport.totalRevenue)}</p>
-            <p className="text-sm text-gray-500">total pendapatan</p>
-          </div>
-
-          <div className="bg-white rounded-lg shadow p-6">
-            <h3 className="text-gray-600 text-sm mb-2">Total Hutang Belum Lunas</h3>
-            <p className="text-3xl font-bold text-red-600">{debts.length}</p>
-            <p className="text-sm text-gray-500">pelanggan</p>
-          </div>
+      {/* Range Filter */}
+      <div className="bg-white rounded-xl shadow p-4 space-y-4">
+        <div className="flex flex-wrap gap-2">
+          {(['hari', 'minggu', 'bulan', 'kustom'] as const).map((r) => (
+            <button
+              key={r}
+              onClick={() => handleRangeChange(r)}
+              className={`px-4 py-2 rounded-lg font-medium transition ${
+                range === r
+                  ? 'bg-green-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              {r === 'hari' ? 'Hari Ini' : r === 'minggu' ? '7 Hari' : r === 'bulan' ? '30 Hari' : 'Kustom'}
+            </button>
+          ))}
         </div>
 
-        {/* Filter Tanggal */}
-        <div className="bg-white rounded-lg shadow p-4 mb-6">
-          <div className="flex items-center gap-4">
-            <label className="font-semibold">Pilih Tanggal:</label>
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+          <div className="flex items-center gap-2">
+            <label className="text-sm font-semibold text-gray-600 shrink-0">Dari:</label>
             <input
               type="date"
-              value={selectedDate}
-              onChange={(e) => {
-                setSelectedDate(e.target.value)
-                fetchDailyReport(e.target.value)
-              }}
-              className="border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500"
             />
           </div>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Daftar Transaksi */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-xl font-bold mb-4 text-gray-800">Daftar Transaksi</h2>
-            
-            {(!dailyReport.transactions || dailyReport.transactions.length === 0) ? (
-              <p className="text-gray-500 text-center py-8">Belum ada transaksi pada tanggal ini</p>
-            ) : (
-              <div className="space-y-3 max-h-96 overflow-y-auto">
-                {dailyReport.transactions.map((tx: any) => (
-                  <div key={tx.id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition">
-                    <div className="flex justify-between items-start mb-2">
-                      <span className="font-semibold text-sm">#{tx.id ? tx.id.slice(0, 8) : 'Unknown'}</span>
-                      <span className="text-xs text-gray-500">{formatDate(tx.transaction_date)}</span>
-                    </div>
-                    
-                    <div className="space-y-1 mb-2">
-                      {tx.transaction_items?.map((item: any, idx: number) => (
-                        <div key={idx} className="text-sm text-gray-600">
-                          {item.products?.name || 'Produk'} x{item.quantity}
-                        </div>
-                      ))}
-                    </div>
-                    
-                    <div className="flex justify-between items-center pt-2 border-t">
-                      <span className="text-sm text-gray-600">Total:</span>
-                      <span className="font-bold text-green-600">{formatRupiah(tx.total_amount)}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+          <div className="flex items-center gap-2">
+            <label className="text-sm font-semibold text-gray-600 shrink-0">Sampai:</label>
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500"
+            />
           </div>
-
-          {/* Daftar Hutang */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-xl font-bold mb-4 text-gray-800">Daftar Hutang Pelanggan</h2>
-            
-            {debts.length === 0 ? (
-              <p className="text-gray-500 text-center py-8">Tidak ada hutang belum lunas</p>
-            ) : (
-              <div className="space-y-3 max-h-96 overflow-y-auto">
-                {debts.map((debt: any) => (
-                  <div key={debt.id} className="border border-red-200 rounded-lg p-4 hover:shadow-md transition">
-                    <div className="flex justify-between items-start mb-2">
-                      <div>
-                        <h4 className="font-bold">{debt.customer_name}</h4>
-                        <p className="text-sm text-gray-600">{debt.customer_phone}</p>
-                      </div>
-                      <span className="bg-red-100 text-red-800 text-xs px-2 py-1 rounded">
-                        Belum Lunas
-                      </span>
-                    </div>
-                    
-                    <div className="mt-2">
-                      <p className="text-sm text-gray-600">
-                        Tanggal: {formatDate(debt.transactions?.transaction_date)}
-                      </p>
-                      <div className="flex justify-between items-center mt-2 pt-2 border-t">
-                        <span className="text-sm">Sisa Hutang:</span>
-                        <span className="font-bold text-red-600 text-lg">
-                          {formatRupiah(debt.remaining_debt)}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+          <button
+            onClick={handleCustomFilter}
+            className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-medium transition"
+          >
+            Terapkan
+          </button>
         </div>
+      </div>
+
+      {/* Stat Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        {statCards.map((card) => (
+          <div key={card.title} className="bg-white rounded-xl shadow p-5 flex items-start gap-4">
+            <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-2xl ${card.color}`}>
+              {card.icon}
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm text-gray-500">{card.title}</p>
+              <p className="text-lg font-bold text-gray-800 truncate">{card.value}</p>
+              <p className="text-xs text-gray-400">{card.sub}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Daftar Transaksi */}
+      <div className="bg-white rounded-xl shadow p-6">
+        <h2 className="text-lg font-bold text-gray-800 mb-4">Daftar Transaksi</h2>
+
+        {loading ? (
+          <div className="flex justify-center py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600"></div>
+          </div>
+        ) : report.transactions.length === 0 ? (
+          <div className="text-center py-12">
+            <div className="text-5xl mb-3">📭</div>
+            <p className="text-gray-500 text-lg">Belum ada transaksi pada periode ini</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {report.transactions.map((tx: any) => (
+              <div key={tx.id} className="border border-gray-200 rounded-xl p-4 hover:shadow-md transition">
+                <div className="flex flex-wrap justify-between items-start gap-2 mb-2">
+                  <div>
+                    <span className="font-semibold text-sm text-gray-700">
+                      #{tx.id ? tx.id.slice(0, 8) : 'Unknown'}
+                    </span>
+                    <span className={`ml-2 text-xs px-2 py-0.5 rounded-full ${
+                      tx.payment_method === 'hutang'
+                        ? 'bg-yellow-100 text-yellow-800'
+                        : 'bg-green-100 text-green-800'
+                    }`}>
+                      {tx.payment_method === 'hutang' ? 'Hutang' : 'Tunai'}
+                    </span>
+                  </div>
+                  <span className="text-xs text-gray-500">{formatDate(tx.transaction_date)}</span>
+                </div>
+
+                <div className="flex flex-wrap gap-x-4 gap-y-1 mb-2">
+                  {tx.transaction_items?.map((item: any, idx: number) => (
+                    <span key={idx} className="text-sm text-gray-600">
+                      {item.products?.name || 'Produk'} x{item.quantity}
+                    </span>
+                  ))}
+                </div>
+
+                <div className="flex justify-between items-center pt-2 border-t">
+                  <span className="text-sm text-gray-600">Total:</span>
+                  <span className="font-bold text-green-600">{formatRupiah(tx.total_amount)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )
 }
+
