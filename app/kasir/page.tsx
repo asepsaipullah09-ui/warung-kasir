@@ -9,6 +9,9 @@ export default function KasirPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [loading, setLoading] = useState(true)
   const [user, setUser] = useState(null)
+  const [showDebtModal, setShowDebtModal] = useState(false)
+  const [customerName, setCustomerName] = useState('')
+  const [customerPhone, setCustomerPhone] = useState('')
   const router = useRouter()
 
   useEffect(() => {
