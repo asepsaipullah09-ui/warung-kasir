@@ -252,6 +252,56 @@ export default function KasirPage() {
           </div>
         </div>
 
+              {/* Modal Hutang */}
+      {showDebtModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-96">
+            <h3 className="text-xl font-bold mb-4">Catat Hutang</h3>
+            
+            <div className="mb-4">
+              <label className="block text-sm font-semibold mb-2">Nama Pelanggan</label>
+              <input
+                type="text"
+                value={customerName}
+                onChange={(e) => setCustomerName(e.target.value)}
+                className="w-full border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Masukkan nama pelanggan"
+              />
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-sm font-semibold mb-2">Nomor Telepon</label>
+              <input
+                type="tel"
+                value={customerPhone}
+                onChange={(e) => setCustomerPhone(e.target.value)}
+                className="w-full border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="0812xxxxxxxx"
+              />
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => handleCheckout(true)}
+                className="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-2 rounded"
+              >
+                Simpan Hutang
+              </button>
+              <button
+                onClick={() => {
+                  setShowDebtModal(false)
+                  setCustomerName('')
+                  setCustomerPhone('')
+                }}
+                className="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 rounded"
+              >
+                Batal
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
         {/* Keranjang */}
         <div className="w-96 bg-white rounded-lg shadow p-4">
           <h2 className="text-xl font-bold mb-4">Keranjang Belanja</h2>
@@ -301,12 +351,20 @@ export default function KasirPage() {
                     Rp {totalAmount.toLocaleString('id-ID')}
                   </span>
                 </div>
-                <button
-                  onClick={handleCheckout}
-                  className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg transition"
-                >
-                  Bayar
-                </button>
+                <div className="space-y-2">
+  <button
+    onClick={() => handleCheckout(false)}
+    className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg transition"
+  >
+    Bayar Tunai
+  </button>
+  <button
+    onClick={() => setShowDebtModal(true)}
+    className="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-3 rounded-lg transition"
+  >
+    Catat Hutang
+  </button>
+</div>
               </div>
             </>
           )}
