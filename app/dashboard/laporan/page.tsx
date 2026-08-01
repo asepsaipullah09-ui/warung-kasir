@@ -1,14 +1,17 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 import { useRouter } from 'next/navigation'
 import { useToast } from '@/components/Toast'
 import { formatRupiah, formatDate, todayISO } from '@/lib/utils'
+import BarChart from '@/components/BarChart'
+import Modal from '@/components/Modal'
+import { exportToExcel, printDocument, printReceipt, formatRupiahExport, formatDateExport } from '@/lib/exportUtils'
 
 export default function LaporanPage() {
   const [loading, setLoading] = useState(true)
   const [user, setUser] = useState<any>(null)
-  const [range, setRange] = useState<'hari' | 'minggu' | 'bulan' | 'kustom'>('hari')
+  const [range, setRange] = useState<'hari' | 'minggu' | 'bulan' | 'tahun' | 'kustom'>('hari')
   const [startDate, setStartDate] = useState(todayISO())
   const [endDate, setEndDate] = useState(todayISO())
   const [report, setReport] = useState({
@@ -18,6 +21,9 @@ export default function LaporanPage() {
     totalDebt: 0,
     transactions: [] as any[],
   })
+  const [chartPeriod, setChartPeriod] = useState<'harian' | 'bulanan' | 'tahunan'>('harian')
+  const [printTx, setPrintTx] = useState<any>(null)
+
   const router = useRouter()
   const { showToast } = useToast()
 
@@ -33,6 +39,10 @@ export default function LaporanPage() {
     } else if (r === 'bulan') {
       const d = new Date(today)
       d.setMonth(d.getMonth() - 1)
+      start = d.toISOString().split('T')[0]
+    } else if (r === 'tahun') {
+      const d = new Date(today)
+      d.setFullYear(d.getFullYear() - 1)
       start = d.toISOString().split('T')[0]
     }
 
@@ -134,6 +144,43 @@ export default function LaporanPage() {
     fetchReport(startDate, endDate)
   }
 
+  // Data grafik
+  const chartData = useMemo(() => {
+    const txs = report.transactions
+    if (chartPeriod === 'harian') {
+      const map = new Map<string, number>()
+      txs.forEach((tx: any) => {
+        const day = tx.transaction_date?.slice(0, 10) || 'Tidak diketahui'
+        map.set(day, (map.get(day) || 0) + (tx.total_amount || 0))
+      })
+      return Array.from(map.entries())
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([label, value]) => ({ label: label.slice(8, 10) + '/' + label.slice(5, 7), value }))
+    } else if (chartPeriod === 'bulanan') {
+      const map = new Map<string, number>()
+      txs.forEach((tx: any) => {
+        const d = tx.transaction_date?.slice(0, 7) || 'Tidak diketahui'
+        map.set(d, (map.get(d) || 0) + (tx.total_amount || 0))
+      })
+      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des']
+      return Array.from(map.entries())
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([label, value]) => {
+          const [y, m] = label.split('-')
+          return { label: monthNames[parseInt(m, 10) - 1] + ' ' + y.slice(2), value }
+        })
+    } else {
+      const map = new Map<string, number>()
+      txs.forEach((tx: any) => {
+        const y = tx.transaction_date?.slice(0, 4) || 'Tidak diketahui'
+        map.set(y, (map.get(y) || 0) + (tx.total_amount || 0))
+      })
+      return Array.from(map.entries())
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([label, value]) => ({ label, value }))
+    }
+  }, [report.transactions, chartPeriod])
+
   const statCards = [
     {
       title: 'Total Transaksi',
@@ -165,6 +212,97 @@ export default function LaporanPage() {
     },
   ]
 
+  // Export ke Excel
+  const handleExportExcel = () => {
+    if (report.transactions.length === 0) {
+      showToast('Tidak ada data untuk diekspor', 'warning')
+      return
+    }
+    const rows = report.transactions.map((tx: any) => ({
+      id: tx.id ? tx.id.slice(0, 8) : '-',
+      date: formatDateExport(tx.transaction_date),
+      method: tx.payment_method === 'hutang' ? 'Hutang' : 'Tunai',
+      items: tx.transaction_items
+        ? tx.transaction_items
+            .map((i: any) => `${i.products?.name || 'Produk'} x${i.quantity}`)
+            .join(', ')
+        : '-',
+      total: formatRupiahExport(tx.total_amount),
+    }))
+    exportToExcel(
+      `Laporan-Penjualan-${startDate}-sampai-${endDate}`,
+      [
+        { header: 'ID', key: 'id' },
+        { header: 'Tanggal', key: 'date' },
+        { header: 'Metode', key: 'method' },
+        { header: 'Item', key: 'items' },
+        { header: 'Total', key: 'total' },
+      ],
+      rows
+    )
+    showToast('Laporan berhasil diekspor ke Excel! 📊')
+  }
+
+  // Cetak PDF
+  const handleExportPDF = () => {
+    if (report.transactions.length === 0) {
+      showToast('Tidak ada data untuk dicetak', 'warning')
+      return
+    }
+    const rows = report.transactions
+      .map(
+        (tx: any) => `
+        <tr>
+          <td>${tx.id ? tx.id.slice(0, 8) : '-'}</td>
+          <td>${formatDateExport(tx.transaction_date)}</td>
+          <td>${tx.payment_method === 'hutang' ? 'Hutang' : 'Tunai'}</td>
+          <td>${tx.transaction_items
+            ? tx.transaction_items
+                .map((i: any) => `${i.products?.name || 'Produk'} x${i.quantity}`)
+                .join(', ')
+            : '-'}</td>
+          <td style="text-align:right">${formatRupiahExport(tx.total_amount)}</td>
+        </tr>`
+      )
+      .join('')
+
+    printDocument(
+      'Laporan Penjualan',
+      `
+      <div class="summary">
+        <p><strong>Periode:</strong> ${formatDateExport(startDate + 'T00:00:00')} — ${formatDateExport(endDate + 'T23:59:59')}</p>
+        <p><strong>Total Transaksi:</strong> ${report.totalTransactions}</p>
+        <p><strong>Total Omset:</strong> ${formatRupiah(report.totalRevenue)}</p>
+        <p><strong>Tunai:</strong> ${formatRupiah(report.totalCash)} | <strong>Hutang:</strong> ${formatRupiah(report.totalDebt)}</p>
+      </div>
+      <table>
+        <thead>
+          <tr><th>ID</th><th>Tanggal</th><th>Metode</th><th>Item</th><th>Total</th></tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>`,
+      { footerNote: 'Dokumen ini dibuat otomatis oleh Kasir Warung.' }
+    )
+  }
+
+  const handlePrintReceipt = (tx: any) => {
+    const items = (tx.transaction_items || []).map((i: any) => ({
+      name: i.products?.name || 'Produk',
+      qty: i.quantity,
+      price: i.subtotal_price / i.quantity,
+      subtotal: i.subtotal_price,
+    }))
+    printReceipt({
+      id: tx.id ? tx.id.slice(0, 8).toUpperCase() : 'UNKNOWN',
+      date: tx.transaction_date,
+      items,
+      total: tx.total_amount,
+      method: tx.payment_method,
+    })
+  }
+
+  const openPrintModal = (tx: any) => setPrintTx(tx)
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -176,7 +314,7 @@ export default function LaporanPage() {
       {/* Range Filter */}
       <div className="bg-white rounded-xl shadow p-4 space-y-4">
         <div className="flex flex-wrap gap-2">
-          {(['hari', 'minggu', 'bulan', 'kustom'] as const).map((r) => (
+          {(['hari', 'minggu', 'bulan', 'tahun', 'kustom'] as const).map((r) => (
             <button
               key={r}
               onClick={() => handleRangeChange(r)}
@@ -186,7 +324,7 @@ export default function LaporanPage() {
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
               }`}
             >
-              {r === 'hari' ? 'Hari Ini' : r === 'minggu' ? '7 Hari' : r === 'bulan' ? '30 Hari' : 'Kustom'}
+              {r === 'hari' ? 'Hari Ini' : r === 'minggu' ? '7 Hari' : r === 'bulan' ? '30 Hari' : r === 'tahun' ? '1 Tahun' : 'Kustom'}
             </button>
           ))}
         </div>
@@ -216,6 +354,22 @@ export default function LaporanPage() {
           >
             Terapkan
           </button>
+          <div className="flex gap-2 sm:ml-auto">
+            <button
+              onClick={handleExportExcel}
+              disabled={report.transactions.length === 0}
+              className="bg-green-700 hover:bg-green-800 disabled:opacity-50 text-white px-4 py-2 rounded-lg font-medium transition"
+            >
+              📗 Excel
+            </button>
+            <button
+              onClick={handleExportPDF}
+              disabled={report.transactions.length === 0}
+              className="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg font-medium transition"
+            >
+              📄 PDF
+            </button>
+          </div>
         </div>
       </div>
 
@@ -235,9 +389,45 @@ export default function LaporanPage() {
         ))}
       </div>
 
+      {/* Grafik Omset */}
+      <div className="bg-white rounded-xl shadow p-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+          <h2 className="text-lg font-bold text-gray-800">📈 Grafik Omset</h2>
+          <div className="flex gap-2">
+            {(['harian', 'bulanan', 'tahunan'] as const).map((p) => (
+              <button
+                key={p}
+                onClick={() => setChartPeriod(p)}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+                  chartPeriod === p
+                    ? 'bg-green-600 text-white'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                {p === 'harian' ? 'Harian' : p === 'bulanan' ? 'Bulanan' : 'Tahunan'}
+              </button>
+            ))}
+          </div>
+        </div>
+        <BarChart
+          data={chartData}
+          title={
+            chartPeriod === 'harian'
+              ? 'Omset per Hari'
+              : chartPeriod === 'bulanan'
+              ? 'Omset per Bulan'
+              : 'Omset per Tahun'
+          }
+          valueFormatter={(v) => formatRupiah(v)}
+        />
+      </div>
+
       {/* Daftar Transaksi */}
       <div className="bg-white rounded-xl shadow p-6">
-        <h2 className="text-lg font-bold text-gray-800 mb-4">Daftar Transaksi</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-bold text-gray-800">Daftar Transaksi</h2>
+          <span className="text-sm text-gray-500">{report.transactions.length} transaksi</span>
+        </div>
 
         {loading ? (
           <div className="flex justify-center py-12">
@@ -265,7 +455,16 @@ export default function LaporanPage() {
                       {tx.payment_method === 'hutang' ? 'Hutang' : 'Tunai'}
                     </span>
                   </div>
-                  <span className="text-xs text-gray-500">{formatDate(tx.transaction_date)}</span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-gray-500">{formatDate(tx.transaction_date)}</span>
+                    <button
+                      onClick={() => openPrintModal(tx)}
+                      className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-2.5 py-1 rounded-lg font-medium transition"
+                      title="Cetak struk"
+                    >
+                      🖨️ Struk
+                    </button>
+                  </div>
                 </div>
 
                 <div className="flex flex-wrap gap-x-4 gap-y-1 mb-2">
@@ -285,6 +484,48 @@ export default function LaporanPage() {
           </div>
         )}
       </div>
+
+      {/* Modal Print Struk */}
+      <Modal
+        isOpen={!!printTx}
+        onClose={() => setPrintTx(null)}
+        title="🖨️ Cetak Struk"
+        maxWidth="max-w-sm"
+      >
+        {printTx && (
+          <div className="space-y-4">
+            <div className="bg-gray-50 rounded-lg p-4 text-center border border-dashed border-gray-300">
+              <div className="font-mono text-sm">
+                <div className="font-bold text-base mb-1">🛒 KASIR WARUNG</div>
+                <div>No: #{printTx.id.slice(0, 8).toUpperCase()}</div>
+                <div>{formatDate(printTx.transaction_date)}</div>
+                <div>Metode: {printTx.payment_method === 'hutang' ? 'Hutang' : 'Tunai'}</div>
+              </div>
+              <hr className="my-2 border-dashed" />
+              {printTx.transaction_items?.map((item: any, idx: number) => (
+                <div key={idx} className="flex justify-between font-mono text-xs">
+                  <span>{item.products?.name || 'Produk'} x{item.quantity}</span>
+                  <span>{formatRupiah(item.subtotal_price)}</span>
+                </div>
+              ))}
+              <hr className="my-2 border-dashed" />
+              <div className="flex justify-between font-mono font-bold">
+                <span>TOTAL</span>
+                <span>{formatRupiah(printTx.total_amount)}</span>
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                handlePrintReceipt(printTx)
+                setPrintTx(null)
+              }}
+              className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg transition"
+            >
+              🖨️ Cetak Sekarang
+            </button>
+          </div>
+        )}
+      </Modal>
     </div>
   )
 }

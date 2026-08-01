@@ -94,3 +94,22 @@ body {
   animation: slide-in-right 0.25s ease-out;
 }
 
+/* Print styles for receipt / report printing */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #print-area,
+  #print-area * {
+    visibility: visible;
+  }
+  #print-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    border: none !important;
+    box-shadow: none !important;
+  }
+}
+

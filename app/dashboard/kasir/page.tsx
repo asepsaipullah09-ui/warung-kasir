@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import Modal from '@/components/Modal'
 import { useToast } from '@/components/Toast'
 import { formatRupiah } from '@/lib/utils'
+import { printReceipt } from '@/lib/exportUtils'
 
 export default function KasirPage() {
   const [products, setProducts] = useState<any[]>([])
@@ -22,6 +23,9 @@ export default function KasirPage() {
   const [showDebtModal, setShowDebtModal] = useState(false)
   const [customerName, setCustomerName] = useState('')
   const [customerPhone, setCustomerPhone] = useState('')
+
+  // State untuk struk transaksi terakhir
+  const [lastReceipt, setLastReceipt] = useState<any>(null)
 
   const router = useRouter()
   const { showToast } = useToast()
@@ -221,12 +225,36 @@ export default function KasirPage() {
 
       setCart([])
       fetchProducts()
+
+      // Siapkan data struk untuk transaksi terakhir
+      setLastReceipt({
+        id: transaction.id,
+        date: transaction.transaction_date || new Date().toISOString(),
+        items: cart.map((item: any) => ({
+          name: item.name,
+          qty: item.quantity,
+          price: item.price,
+          subtotal: item.price * item.quantity,
+        })),
+        total: totalAmount,
+        method: paymentMethod,
+        cash: paymentMethod === 'tunai' ? cashPaidNum : undefined,
+        change: paymentMethod === 'tunai' ? change : undefined,
+        customerName: paymentMethod === 'hutang' ? customerName : undefined,
+      })
+
       return true
     } catch (error: any) {
       console.error('Error:', error)
       showToast('Terjadi kesalahan: ' + error.message, 'error')
       return false
     }
+  }
+
+  const handlePrintLastReceipt = () => {
+    if (!lastReceipt) return
+    printReceipt(lastReceipt)
+    setLastReceipt(null)
   }
 
   const cartContent = (
@@ -561,6 +589,58 @@ export default function KasirPage() {
             )}
           </button>
         </div>
+      </Modal>
+
+      {/* Modal Cetak Struk */}
+      <Modal
+        isOpen={!!lastReceipt}
+        onClose={() => setLastReceipt(null)}
+        title="🖨️ Cetak Struk"
+        maxWidth="max-w-sm"
+      >
+        {lastReceipt && (
+          <div className="space-y-4">
+            <div className="bg-gray-50 rounded-lg p-4 text-center border border-dashed border-gray-300">
+              <div className="font-mono text-sm">
+                <div className="font-bold text-base mb-1">🛒 KASIR WARUNG</div>
+                <div>No: #{lastReceipt.id.slice(0, 8).toUpperCase()}</div>
+                <div>{new Date(lastReceipt.date).toLocaleString('id-ID')}</div>
+                <div>Metode: {lastReceipt.method === 'hutang' ? 'Hutang' : 'Tunai'}</div>
+                {lastReceipt.customerName && <div>Pelanggan: {lastReceipt.customerName}</div>}
+              </div>
+              <hr className="my-2 border-dashed" />
+              {lastReceipt.items.map((item: any, idx: number) => (
+                <div key={idx} className="flex justify-between font-mono text-xs">
+                  <span>{item.name} x{item.qty}</span>
+                  <span>{formatRupiah(item.subtotal)}</span>
+                </div>
+              ))}
+              <hr className="my-2 border-dashed" />
+              <div className="flex justify-between font-mono font-bold">
+                <span>TOTAL</span>
+                <span>{formatRupiah(lastReceipt.total)}</span>
+              </div>
+              {lastReceipt.cash !== undefined && (
+                <div className="flex justify-between font-mono text-xs mt-1">
+                  <span>Bayar</span>
+                  <span>{formatRupiah(lastReceipt.cash)}</span>
+                </div>
+              )}
+              {lastReceipt.change !== undefined && lastReceipt.change >= 0 && (
+                <div className="flex justify-between font-mono text-xs">
+                  <span>Kembalian</span>
+                  <span>{formatRupiah(lastReceipt.change)}</span>
+                </div>
+              )}
+            </div>
+            <button
+              onClick={handlePrintLastReceipt}
+              className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg transition"
+            >
+              🖨️ Cetak Sekarang
+            </button>
+          </div>
+        )}
       </Modal>
     </div>
   )

@@ -51,6 +51,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     { name: 'Stok Barang', icon: '📦', path: '/dashboard/stok', roles: ['pengelola_stok'] },
     { name: 'Laporan', icon: '📊', path: '/dashboard/laporan', roles: ['pemilik'] },
     { name: 'Hutang', icon: '📝', path: '/dashboard/hutang', roles: ['admin_kasir', 'pemilik'] },
+    { name: 'Backup Data', icon: '💾', path: '/dashboard/backup', roles: ['pemilik'] },
   ]
 
   const menuItems = allMenuItems.filter(
