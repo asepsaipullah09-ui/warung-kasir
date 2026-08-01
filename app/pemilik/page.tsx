@@ -5,13 +5,15 @@ import { useRouter } from 'next/navigation'
 
 export default function PemilikPage() {
   const [loading, setLoading] = useState(true)
-  const [user, setUser] = useState(null)
+  const [user, setUser] = useState<any>(null)
+  
+  // Tambahkan tipe data any[] agar Vercel tidak komplain saat build
   const [dailyReport, setDailyReport] = useState({
     totalTransactions: 0,
     totalRevenue: 0,
-    transactions: []
+    transactions: [] as any[]
   })
-  const [debts, setDebts] = useState([])
+  const [debts, setDebts] = useState<any[]>([])
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0])
   const router = useRouter()
 
@@ -42,13 +44,12 @@ export default function PemilikPage() {
     }
 
     checkAuth()
-  }, [router])
+  }, [router]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Ambil laporan harian berdasarkan tanggal
-  const fetchDailyReport = async (date) => {
+  const fetchDailyReport = async (date: string) => {
     setLoading(true)
     
-    // Hitung total transaksi dan revenue hari ini
     const startOfDay = `${date}T00:00:00`
     const endOfDay = `${date}T23:59:59`
 
@@ -71,12 +72,17 @@ export default function PemilikPage() {
 
     if (error) {
       console.error('Error fetching transactions:', error)
+      // Pastikan tetap array kosong jika error
+      setDailyReport({ totalTransactions: 0, totalRevenue: 0, transactions: [] })
     } else {
-      const totalRevenue = transactions.reduce((sum, tx) => sum + tx.total_amount, 0)
+      // Gunakan (transactions || []) untuk mencegah error jika data null
+      const safeTransactions = transactions || []
+      const totalRevenue = safeTransactions.reduce((sum: number, tx: any) => sum + (tx.total_amount || 0), 0)
+      
       setDailyReport({
-        totalTransactions: transactions.length,
+        totalTransactions: safeTransactions.length,
         totalRevenue,
-        transactions
+        transactions: safeTransactions
       })
     }
     setLoading(false)
@@ -97,18 +103,19 @@ export default function PemilikPage() {
 
     if (error) {
       console.error('Error fetching debts:', error)
+      setDebts([])
     } else {
-      setDebts(data)
+      // Gunakan (data || []) untuk mencegah error jika data null
+      setDebts(data || [])
     }
   }
 
-  // Format rupiah
-  const formatRupiah = (amount) => {
-    return `Rp ${amount.toLocaleString('id-ID')}`
+  const formatRupiah = (amount: number) => {
+    return `Rp ${(amount || 0).toLocaleString('id-ID')}`
   }
 
-  // Format tanggal
-  const formatDate = (dateString) => {
+  const formatDate = (dateString: string) => {
+    if (!dateString) return '-'
     return new Date(dateString).toLocaleString('id-ID', {
       dateStyle: 'medium',
       timeStyle: 'short'
@@ -118,7 +125,7 @@ export default function PemilikPage() {
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600"></div>
       </div>
     )
   }
@@ -184,21 +191,21 @@ export default function PemilikPage() {
           <div className="bg-white rounded-lg shadow p-6">
             <h2 className="text-xl font-bold mb-4 text-gray-800">Daftar Transaksi</h2>
             
-            {dailyReport.transactions.length === 0 ? (
+            {(!dailyReport.transactions || dailyReport.transactions.length === 0) ? (
               <p className="text-gray-500 text-center py-8">Belum ada transaksi pada tanggal ini</p>
             ) : (
               <div className="space-y-3 max-h-96 overflow-y-auto">
-                {dailyReport.transactions.map((tx) => (
+                {dailyReport.transactions.map((tx: any) => (
                   <div key={tx.id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition">
                     <div className="flex justify-between items-start mb-2">
-                      <span className="font-semibold text-sm">#{tx.id.slice(0, 8)}</span>
+                      <span className="font-semibold text-sm">#{tx.id ? tx.id.slice(0, 8) : 'Unknown'}</span>
                       <span className="text-xs text-gray-500">{formatDate(tx.transaction_date)}</span>
                     </div>
                     
                     <div className="space-y-1 mb-2">
-                      {tx.transaction_items?.map((item, idx) => (
+                      {tx.transaction_items?.map((item: any, idx: number) => (
                         <div key={idx} className="text-sm text-gray-600">
-                          {item.products?.name} x{item.quantity}
+                          {item.products?.name || 'Produk'} x{item.quantity}
                         </div>
                       ))}
                     </div>
@@ -221,7 +228,7 @@ export default function PemilikPage() {
               <p className="text-gray-500 text-center py-8">Tidak ada hutang belum lunas</p>
             ) : (
               <div className="space-y-3 max-h-96 overflow-y-auto">
-                {debts.map((debt) => (
+                {debts.map((debt: any) => (
                   <div key={debt.id} className="border border-red-200 rounded-lg p-4 hover:shadow-md transition">
                     <div className="flex justify-between items-start mb-2">
                       <div>
