@@ -4,18 +4,20 @@ import { supabase } from '@/lib/supabaseClient'
 import { useRouter } from 'next/navigation'
 
 export default function KasirPage() {
-  const [products, setProducts] = useState([])
-  const [cart, setCart] = useState([])
+  const [products, setProducts] = useState<any[]>([])
+  const [cart, setCart] = useState<any[]>([])
   const [searchTerm, setSearchTerm] = useState('')
   const [loading, setLoading] = useState(true)
-  const [user, setUser] = useState(null)
+  const [user, setUser] = useState<any>(null)
+  
+  // State untuk Modal Hutang
   const [showDebtModal, setShowDebtModal] = useState(false)
   const [customerName, setCustomerName] = useState('')
   const [customerPhone, setCustomerPhone] = useState('')
+  
   const router = useRouter()
 
   useEffect(() => {
-    // Cek apakah user sudah login
     const checkAuth = async () => {
       const { data: { user } } = await supabase.auth.getUser()
       
@@ -24,7 +26,6 @@ export default function KasirPage() {
         return
       }
 
-      // Cek role user
       const { data: profile } = await supabase
         .from('profiles')
         .select('role')
@@ -44,7 +45,6 @@ export default function KasirPage() {
     checkAuth()
   }, [router])
 
-  // Ambil semua produk dari database
   const fetchProducts = async () => {
     const { data, error } = await supabase
       .from('products')
@@ -54,55 +54,47 @@ export default function KasirPage() {
     if (error) {
       console.error('Error fetching products:', error)
     } else {
-      setProducts(data)
+      setProducts(data || [])
     }
     setLoading(false)
   }
 
-  // Tambah produk ke keranjang
-  const addToCart = (product) => {
-    const existingItem = cart.find(item => item.id === product.id)
+  const addToCart = (product: any) => {
+    const existingItem = cart.find((item: any) => item.id === product.id)
     
     if (existingItem) {
-      // Jika produk sudah ada di cart, tambah quantity
-      setCart(cart.map(item =>
+      setCart(cart.map((item: any) =>
         item.id === product.id
           ? { ...item, quantity: item.quantity + 1 }
           : item
       ))
     } else {
-      // Jika produk belum ada di cart, tambahkan dengan quantity 1
       setCart([...cart, { ...product, quantity: 1 }])
     }
   }
 
-  // Kurangi quantity di keranjang
-  const decreaseQuantity = (productId) => {
-    setCart(cart.map(item => {
+  const decreaseQuantity = (productId: string) => {
+    setCart(cart.map((item: any) => {
       if (item.id === productId) {
         return { ...item, quantity: Math.max(0, item.quantity - 1) }
       }
       return item
-    }).filter(item => item.quantity > 0))
+    }).filter((item: any) => item.quantity > 0))
   }
 
-  // Hapus dari keranjang
-  const removeFromCart = (productId) => {
-    setCart(cart.filter(item => item.id !== productId))
+  const removeFromCart = (productId: string) => {
+    setCart(cart.filter((item: any) => item.id !== productId))
   }
 
-  // Hitung total harga
-  const totalAmount = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0)
+  const totalAmount = cart.reduce((sum: number, item: any) => sum + (item.price * item.quantity), 0)
 
-  // Proses checkout
-    // Proses checkout
-  const handleCheckout = async (isDebt = false) => {
+  const handleCheckout = async (isDebt: boolean) => {
     if (cart.length === 0) {
       alert('Keranjang masih kosong!')
       return
     }
 
-    if (isDebt && (!customerName || !customerPhone)) {
+    if (isDebt && (!customerName.trim() || !customerPhone.trim())) {
       alert('Nama dan nomor telepon pelanggan wajib diisi!')
       return
     }
@@ -119,8 +111,8 @@ export default function KasirPage() {
     try {
       // 1. Kurangi stok produk
       for (const item of cart) {
-        const product = products.find(p => p.id === item.id)
-        if (product.stock < item.quantity) {
+        const product = products.find((p: any) => p.id === item.id)
+        if (!product || product.stock < item.quantity) {
           alert(`Stok ${item.name} tidak mencukupi!`)
           return
         }
@@ -146,7 +138,7 @@ export default function KasirPage() {
       if (txError) throw txError
 
       // 3. Buat detail transaksi (transaction_items)
-      const transactionItems = cart.map(item => ({
+      const transactionItems = cart.map((item: any) => ({
         transaction_id: transaction.id,
         product_id: item.id,
         quantity: item.quantity,
@@ -185,14 +177,13 @@ export default function KasirPage() {
       setCustomerPhone('')
       fetchProducts()
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error:', error)
-      alert('Terjadi kesalahan saat memproses transaksi!')
+      alert('Terjadi kesalahan saat memproses transaksi: ' + error.message)
     }
   }
 
-  // Filter produk berdasarkan search
-  const filteredProducts = products.filter(product =>
+  const filteredProducts = products.filter((product: any) =>
     product.name.toLowerCase().includes(searchTerm.toLowerCase())
   )
 
@@ -236,7 +227,7 @@ export default function KasirPage() {
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-            {filteredProducts.map((product) => (
+            {filteredProducts.map((product: any) => (
               <div
                 key={product.id}
                 onClick={() => addToCart(product)}
@@ -252,10 +243,79 @@ export default function KasirPage() {
           </div>
         </div>
 
-              {/* Modal Hutang */}
+        {/* Keranjang */}
+        <div className="w-96 bg-white rounded-lg shadow p-4 h-fit">
+          <h2 className="text-xl font-bold mb-4">Keranjang Belanja</h2>
+          
+          {cart.length === 0 ? (
+            <p className="text-gray-500 text-center py-8">Keranjang kosong</p>
+          ) : (
+            <>
+              <div className="space-y-3 mb-4 max-h-96 overflow-y-auto">
+                {cart.map((item: any) => (
+                  <div key={item.id} className="flex justify-between items-center border-b pb-2">
+                    <div className="flex-1">
+                      <p className="font-semibold">{item.name}</p>
+                      <p className="text-sm text-gray-600">
+                        Rp {item.price.toLocaleString('id-ID')} x {item.quantity}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => decreaseQuantity(item.id)}
+                        className="bg-gray-200 hover:bg-gray-300 px-2 py-1 rounded"
+                      >
+                        -
+                      </button>
+                      <span className="w-8 text-center">{item.quantity}</span>
+                      <button
+                        onClick={() => addToCart(item)}
+                        className="bg-gray-200 hover:bg-gray-300 px-2 py-1 rounded"
+                      >
+                        +
+                      </button>
+                      <button
+                        onClick={() => removeFromCart(item.id)}
+                        className="text-red-500 hover:text-red-700 ml-2"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="border-t pt-4">
+                <div className="flex justify-between items-center mb-4">
+                  <span className="text-lg font-bold">Total:</span>
+                  <span className="text-2xl font-bold text-blue-600">
+                    Rp {totalAmount.toLocaleString('id-ID')}
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  <button
+                    onClick={() => handleCheckout(false)}
+                    className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg transition"
+                  >
+                    Bayar Tunai
+                  </button>
+                  <button
+                    onClick={() => setShowDebtModal(true)}
+                    className="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-3 rounded-lg transition"
+                  >
+                    Catat Hutang
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Modal Hutang (Dipindah ke luar container utama agar z-index dan overlay-nya sempurna) */}
       {showDebtModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-96">
+          <div className="bg-white rounded-lg p-6 w-96 shadow-2xl">
             <h3 className="text-xl font-bold mb-4">Catat Hutang</h3>
             
             <div className="mb-4">
@@ -301,75 +361,6 @@ export default function KasirPage() {
           </div>
         </div>
       )}
-
-        {/* Keranjang */}
-        <div className="w-96 bg-white rounded-lg shadow p-4">
-          <h2 className="text-xl font-bold mb-4">Keranjang Belanja</h2>
-          
-          {cart.length === 0 ? (
-            <p className="text-gray-500 text-center py-8">Keranjang kosong</p>
-          ) : (
-            <>
-              <div className="space-y-3 mb-4 max-h-96 overflow-y-auto">
-                {cart.map((item) => (
-                  <div key={item.id} className="flex justify-between items-center border-b pb-2">
-                    <div className="flex-1">
-                      <p className="font-semibold">{item.name}</p>
-                      <p className="text-sm text-gray-600">
-                        Rp {item.price.toLocaleString('id-ID')} x {item.quantity}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => decreaseQuantity(item.id)}
-                        className="bg-gray-200 hover:bg-gray-300 px-2 py-1 rounded"
-                      >
-                        -
-                      </button>
-                      <span className="w-8 text-center">{item.quantity}</span>
-                      <button
-                        onClick={() => addToCart(item)}
-                        className="bg-gray-200 hover:bg-gray-300 px-2 py-1 rounded"
-                      >
-                        +
-                      </button>
-                      <button
-                        onClick={() => removeFromCart(item.id)}
-                        className="text-red-500 hover:text-red-700 ml-2"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="border-t pt-4">
-                <div className="flex justify-between items-center mb-4">
-                  <span className="text-lg font-bold">Total:</span>
-                  <span className="text-2xl font-bold text-blue-600">
-                    Rp {totalAmount.toLocaleString('id-ID')}
-                  </span>
-                </div>
-                <div className="space-y-2">
-  <button
-    onClick={() => handleCheckout(false)}
-    className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg transition"
-  >
-    Bayar Tunai
-  </button>
-  <button
-    onClick={() => setShowDebtModal(true)}
-    className="w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-3 rounded-lg transition"
-  >
-    Catat Hutang
-  </button>
-</div>
-              </div>
-            </>
-          )}
-        </div>
-      </div>
     </div>
   )
 }
